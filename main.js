@@ -2,7 +2,7 @@
 // @name         PTA 模拟代码输入
 // @namespace    http://tampermonkey.net/
 // @version      2.0
-// @description  模拟代码输入到PTA编辑器
+// @description  绕过PTA粘贴限制;PTA 强制模拟粘贴限制;支持暂停和一键清空
 // @author       Jimmy
 // @match        https://pintia.cn/*
 // @grant        none
