@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         PTA 模拟代码输入
 // @namespace    http://tampermonkey.net/
-// @version      2.1
-// @description  绕过PTA粘贴限制;PTA 强制模拟粘贴限制;支持暂停和一键清空
+// @version      2.2
+// @description  绕过 PTA 粘贴限制，支持模拟输入、暂停继续和停止重来
 // @author       Jimmy
 // @match        https://pintia.cn/*
 // @grant        none
@@ -12,18 +12,19 @@
 (function () {
   "use strict";
 
-  // 存储用户预设的代码
   let userCode = ``;
 
-  // === 状态控制变量 ===
-  let isTyping = false; // 是否正在输入
-  let isPaused = false; // 是否已暂停
-  let shouldStop = false; // 是否需要强行终止输入
+  let isTyping = false;
+  let isPaused = false;
+  let shouldStop = false;
+  let activeTypingTask = null;
+  let pendingEditorClickHandler = null;
 
-  // 声明按钮变量，方便全局更新状态
-  let executeBtn, pauseBtn, resetBtn;
+  let executeBtn;
+  let pauseBtn;
+  let resetBtn;
+  let textareaEl;
 
-  // 创建用户界面
   function createUI() {
     const container = document.createElement("div");
     container.style.cssText = `
@@ -34,12 +35,11 @@
       width: 280px;
       background: #fff;
       border-radius: 8px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
       overflow: hidden;
       font-family: Arial, sans-serif;
     `;
 
-    // 标题栏
     const header = document.createElement("div");
     header.style.cssText = `
       padding: 12px 16px;
@@ -53,43 +53,43 @@
       align-items: center;
       user-select: none;
     `;
-    header.textContent = "PTA 模拟输入 (按住拖动)";
+    header.textContent = "PTA 模拟输入（按住拖动）";
     container.appendChild(header);
 
-    // 拖动功能
     let isDragging = false;
-    let offsetX, offsetY;
-    header.addEventListener("mousedown", (e) => {
+    let offsetX = 0;
+    let offsetY = 0;
+
+    header.addEventListener("mousedown", (event) => {
       isDragging = true;
       const rect = container.getBoundingClientRect();
-      offsetX = e.clientX - rect.left;
-      offsetY = e.clientY - rect.top;
+      offsetX = event.clientX - rect.left;
+      offsetY = event.clientY - rect.top;
       header.style.background = "#005a9e";
-      container.style.boxShadow = "0 6px 16px rgba(0,0,0,0.2)";
+      container.style.boxShadow = "0 6px 16px rgba(0, 0, 0, 0.2)";
     });
-    document.addEventListener("mousemove", (e) => {
+
+    document.addEventListener("mousemove", (event) => {
       if (!isDragging) return;
-      container.style.left = (e.clientX - offsetX) + "px";
-      container.style.top = (e.clientY - offsetY) + "px";
+      container.style.left = `${event.clientX - offsetX}px`;
+      container.style.top = `${event.clientY - offsetY}px`;
       container.style.bottom = "auto";
       container.style.right = "auto";
     });
+
     document.addEventListener("mouseup", () => {
-      if (isDragging) {
-        isDragging = false;
-        header.style.background = "#0078d7";
-        container.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
-      }
+      if (!isDragging) return;
+      isDragging = false;
+      header.style.background = "#0078d7";
+      container.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
     });
 
-    // 内容面板
     const content = document.createElement("div");
     content.style.cssText = `padding: 16px;`;
 
-    // 代码输入区域
-    const textarea = document.createElement("textarea");
-    textarea.value = userCode;
-    textarea.style.cssText = `
+    textareaEl = document.createElement("textarea");
+    textareaEl.value = userCode;
+    textareaEl.style.cssText = `
       width: 100%;
       height: 180px;
       margin-bottom: 12px;
@@ -100,13 +100,12 @@
       resize: vertical;
       box-sizing: border-box;
     `;
-    textarea.placeholder = "请输入要自动填充的代码...";
-    textarea.addEventListener("input", function () {
+    textareaEl.placeholder = "请输入要自动填充的代码...";
+    textareaEl.addEventListener("input", function () {
       userCode = this.value;
     });
-    content.appendChild(textarea);
+    content.appendChild(textareaEl);
 
-    // === 按钮容器 ===
     const btnContainer = document.createElement("div");
     btnContainer.style.cssText = `
       display: flex;
@@ -114,25 +113,22 @@
       gap: 8px;
     `;
 
-    // 1. 执行按钮
     executeBtn = document.createElement("button");
     executeBtn.textContent = "执行";
     executeBtn.style.cssText = btnBaseStyle("#0078d7");
     executeBtn.addEventListener("click", startAutoInput);
 
-    // 2. 暂停/继续按钮
     pauseBtn = document.createElement("button");
     pauseBtn.textContent = "暂停";
     pauseBtn.style.cssText = btnBaseStyle("#f2a900");
-    pauseBtn.disabled = true; // 默认不可用
+    pauseBtn.disabled = true;
     pauseBtn.style.opacity = "0.5";
     pauseBtn.addEventListener("click", togglePause);
 
-    // 3. 重置按钮
     resetBtn = document.createElement("button");
     resetBtn.textContent = "清空代码";
     resetBtn.style.cssText = btnBaseStyle("#d83b01");
-    resetBtn.addEventListener("click", resetEditorContent);
+    resetBtn.addEventListener("click", handleResetAction);
 
     btnContainer.appendChild(executeBtn);
     btnContainer.appendChild(pauseBtn);
@@ -143,7 +139,6 @@
     document.body.appendChild(container);
   }
 
-  // 按钮基础样式辅助函数
   function btnBaseStyle(color) {
     return `
       background: ${color};
@@ -158,79 +153,132 @@
     `;
   }
 
-// === 突破浏览器后台限制的休眠函数 ===
+  function setTextareaLocked(locked) {
+    if (!textareaEl) return;
+    textareaEl.disabled = locked;
+    textareaEl.style.opacity = locked ? "0.65" : "1";
+    textareaEl.style.cursor = locked ? "not-allowed" : "text";
+  }
+
+  function setResetButtonMode(isRunning) {
+    if (!resetBtn) return;
+    resetBtn.textContent = isRunning ? "停止重来" : "清空代码";
+    resetBtn.style.background = isRunning ? "#a4262c" : "#d83b01";
+  }
+
+  function removePendingEditorClickHandler() {
+    if (!pendingEditorClickHandler) return;
+    document.body.removeEventListener("click", pendingEditorClickHandler, true);
+    pendingEditorClickHandler = null;
+  }
+
+  function getEditor() {
+    return document.querySelector('.cm-content[contenteditable="true"]');
+  }
+
   let sleepWorker = null;
   try {
-    // 创建一个后台线程 Web Worker，它不会因为切换标签页被降速
     const workerCode = `
-      self.onmessage = function(e) {
-        setTimeout(() => self.postMessage('done'), e.data);
-      }
+      self.onmessage = function (event) {
+        setTimeout(() => self.postMessage("done"), event.data);
+      };
     `;
-    const workerBlob = new Blob([workerCode], { type: "application/javascript" });
+    const workerBlob = new Blob([workerCode], {
+      type: "application/javascript",
+    });
     sleepWorker = new Worker(URL.createObjectURL(workerBlob));
   } catch (error) {
-    console.warn("PTA 的安全策略阻止了 Worker 创建，将回退到普通模式");
+    console.warn("PTA 的安全策略阻止了 Worker 创建，将回退到普通模式。", error);
   }
 
   function sleep(ms) {
     return new Promise((resolve) => {
       if (sleepWorker) {
-        // 如果 Worker 创建成功，使用后台线程计时
         sleepWorker.onmessage = () => resolve();
         sleepWorker.postMessage(ms);
       } else {
-        // 兼容降级方案
         setTimeout(resolve, ms);
       }
     });
   }
-  // ==============================================
-  // === 核心逻辑 ===
 
-  // 切换暂停/继续状态
   function togglePause() {
     if (!isTyping) return;
 
     isPaused = !isPaused;
     if (isPaused) {
       pauseBtn.textContent = "继续";
-      pauseBtn.style.background = "#107c10"; // 变成绿色提示可继续
+      pauseBtn.style.background = "#107c10";
       executeBtn.textContent = "已暂停";
     } else {
       pauseBtn.textContent = "暂停";
-      pauseBtn.style.background = "#f2a900"; // 恢复橙色
+      pauseBtn.style.background = "#f2a900";
       executeBtn.textContent = "输入中...";
     }
   }
 
-  // 一键清空编辑器代码
-  async function resetEditorContent() {
-    // 1. 如果正在打字，先强制停止
-    if (isTyping) {
-      shouldStop = true;
-      isPaused = false; // 解除暂停状态以让循环退出
+  async function clearEditorContent(showMissingAlert = true) {
+    const editor = getEditor();
+    if (!editor) {
+      if (showMissingAlert) {
+        alert("未找到代码编辑器！");
+      }
+      return false;
     }
 
-    // 2. 寻找编辑器
-    const editor = document.querySelector('.cm-content[contenteditable="true"]');
-    if (editor) {
-      editor.focus();
-      // 模拟全选操作
-      document.execCommand("selectAll", false, null);
-      await sleep(50);
-      // 模拟删除操作
-      document.execCommand("delete", false, null);
-    } else {
-      alert("未找到编辑器框！");
-    }
+    editor.focus();
+    document.execCommand("selectAll", false, null);
+    await sleep(50);
+    document.execCommand("delete", false, null);
+    return true;
   }
 
-  // 恢复按钮初始状态
+  async function stopCurrentTask() {
+    if (!isTyping && !pendingEditorClickHandler) return;
+
+    shouldStop = true;
+    isPaused = false;
+    removePendingEditorClickHandler();
+
+    executeBtn.textContent = "停止中...";
+    executeBtn.disabled = true;
+    executeBtn.style.background = "#555";
+
+    pauseBtn.textContent = "暂停";
+    pauseBtn.disabled = true;
+    pauseBtn.style.background = "#f2a900";
+    pauseBtn.style.opacity = "0.5";
+
+    if (activeTypingTask) {
+      await activeTypingTask;
+      return;
+    }
+
+    restoreButtons();
+  }
+
+  async function handleResetAction() {
+    if (isTyping) {
+      await stopCurrentTask();
+      await clearEditorContent(false);
+      return;
+    }
+
+    if (pendingEditorClickHandler) {
+      await stopCurrentTask();
+      return;
+    }
+
+    await clearEditorContent(true);
+  }
+
   function restoreButtons() {
     isTyping = false;
     isPaused = false;
     shouldStop = false;
+    activeTypingTask = null;
+
+    removePendingEditorClickHandler();
 
     executeBtn.textContent = "执行";
     executeBtn.disabled = false;
@@ -240,50 +288,56 @@
     pauseBtn.disabled = true;
     pauseBtn.style.background = "#f2a900";
     pauseBtn.style.opacity = "0.5";
+
+    setTextareaLocked(false);
+    setResetButtonMode(false);
   }
 
-  // 模拟真实打字
   async function simulateTyping(element, text) {
     isTyping = true;
     isPaused = false;
     shouldStop = false;
 
-    // 设置按钮状态
     pauseBtn.disabled = false;
     pauseBtn.style.opacity = "1";
+    setTextareaLocked(true);
+    setResetButtonMode(true);
 
     element.focus();
 
-    for (let i = 0; i < text.length; i++) {
-      // 如果触发了停止（按了清空重置按钮），立刻跳出循环
-      if (shouldStop) {
-        break;
-      }
-
-      // 如果触发了暂停，死循环等待，直到取消暂停或被强行停止
-      while (isPaused) {
-        await sleep(100);
+    try {
+      for (let index = 0; index < text.length; index += 1) {
         if (shouldStop) break;
+
+        while (isPaused) {
+          await sleep(100);
+          if (shouldStop) break;
+        }
+
+        if (shouldStop) break;
+
+        element.focus();
+        document.execCommand("insertText", false, text[index]);
+
+        const delay = 0;
+        await sleep(delay);
       }
-
-      if (shouldStop) break; // 二次确认跳出
-
-      element.focus();
-      const char = text[i];
-      document.execCommand("insertText", false, char);
-
-      // 你保留的0延迟（如果被判作弊，可以适当加到 1~5）
-      const delay = Math.floor(Math.random() * 0) + 0;
-      await sleep(delay);
+    } finally {
+      restoreButtons();
     }
-
-    // 输入结束后恢复按钮状态
-    restoreButtons();
   }
 
-  // 启动自动输入流程
+  async function startTypingOnTarget(target) {
+    executeBtn.textContent = "输入中...";
+    executeBtn.disabled = true;
+    executeBtn.style.background = "#555";
+
+    activeTypingTask = simulateTyping(target, userCode);
+    await activeTypingTask;
+  }
+
   async function startAutoInput() {
-    if (isTyping) return; // 如果正在输入，防止重复点击
+    if (isTyping || pendingEditorClickHandler) return;
 
     if (!userCode.trim()) {
       alert("请先输入要填充的代码！");
@@ -292,38 +346,33 @@
 
     executeBtn.textContent = "准备中...";
     executeBtn.disabled = true;
-    executeBtn.style.background = "#555"; // 按钮变灰并不可点
+    executeBtn.style.background = "#555";
+    setTextareaLocked(true);
+    setResetButtonMode(true);
 
-    const editor = document.querySelector('.cm-content[contenteditable="true"]');
-
+    const editor = getEditor();
     if (editor) {
-      executeBtn.textContent = "输入中...";
-      await simulateTyping(editor, userCode);
-    } else {
-      executeBtn.textContent = "请点击代码框";
-      executeBtn.style.background = "#f2a900";
-      executeBtn.disabled = false;
-
-      const clickHandler = async function (e) {
-        const target = e.target.closest('.cm-content') || e.target;
-
-        if (target.isContentEditable) {
-          e.preventDefault();
-          e.stopPropagation();
-          document.body.removeEventListener("click", clickHandler, true);
-
-          executeBtn.textContent = "输入中...";
-          executeBtn.disabled = true;
-          executeBtn.style.background = "#555";
-
-          await simulateTyping(target, userCode);
-        }
-      };
-
-      document.body.addEventListener("click", clickHandler, true);
+      await startTypingOnTarget(editor);
+      return;
     }
+
+    executeBtn.textContent = "请点击代码框";
+    executeBtn.style.background = "#f2a900";
+    executeBtn.disabled = true;
+
+    pendingEditorClickHandler = async function (event) {
+      const target = event.target.closest(".cm-content") || event.target;
+      if (!target || !target.isContentEditable) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      removePendingEditorClickHandler();
+
+      await startTypingOnTarget(target);
+    };
+
+    document.body.addEventListener("click", pendingEditorClickHandler, true);
   }
 
-  // 初始化UI
   createUI();
 })();
