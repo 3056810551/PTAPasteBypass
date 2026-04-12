@@ -18,20 +18,13 @@
 
 ## 文件说明
 
-| 文件 | 定位 | 说明 |
-| --- | --- | --- |
-| `pintia-paste-optimized.user.js` | 推荐 | 自动拦截粘贴并改为模拟输入，最省事 |
-| `pintia-paste-enhanced.user.js` | 备选 | 面板增强版，支持暂停、继续、停止重来、清空代码 |
-| `pintia-paste-basic.user.js` | 备选 | 面板基础版，保留最早的手动执行输入方案 |
-| `demo.gif` | 演示 | 项目整体使用演示 |
-| `beta-demo.png` | 截图 | 增强版面板示意图 |
-
-本次已顺手统一命名：
-
-- `main.js` -> `pintia-paste-basic.user.js`
-- `main.beta.js` -> `pintia-paste-enhanced.user.js`
-- `Demo.gif` -> `demo.gif`
-- `beta.demo.png` -> `beta-demo.png`
+| 文件                             | 定位 | 说明                                           |
+| -------------------------------- | ---- | ---------------------------------------------- |
+| `pintia-paste-optimized.user.js` | 推荐 | 自动拦截粘贴并改为模拟输入，最省事             |
+| `pintia-paste-enhanced.user.js`  | 备选 | 面板增强版，支持暂停、继续、停止重来、清空代码 |
+| `pintia-paste-basic.user.js`     | 备选 | 面板基础版，保留最早的手动执行输入方案         |
+| `demo.gif`                       | 演示 | 项目整体使用演示                               |
+| `beta-demo.png`                  | 截图 | 增强版面板示意图                               |
 
 ## 使用方法
 
