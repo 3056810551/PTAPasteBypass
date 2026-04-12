@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         PTA 模拟代码输入
+// @name         Pintia Paste Basic
 // @namespace    http://tampermonkey.net/
 // @version      2.0
-// @description  绕过PTA粘贴限制;PTA 强制模拟粘贴限制;支持暂停和一键清空
+// @description  Pintia 面板版模拟输入脚本（基础版）
 // @author       Jimmy
 // @match        https://pintia.cn/*
 // @grant        none
